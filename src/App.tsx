@@ -1025,7 +1025,6 @@ export default function App() {
   const [connected, setConnected] = React.useState(false);
   const [data, setData] = React.useState<DashboardPayload>(FALLBACK_DATA);
   const [lastUpdate, setLastUpdate] = React.useState<number | null>(null);
-  const [copyState, setCopyState] = React.useState<"idle" | "ok" | "err">("idle");
   const [soundEnabled, setSoundEnabled] = React.useState(false);
   const [soundUnlocked, setSoundUnlocked] = React.useState(false);
   const [planOpen, setPlanOpen] = React.useState(false);
@@ -1279,10 +1278,6 @@ export default function App() {
     return { completed, total };
   }, [data.todos]);
 
-  const rawJsonText = React.useMemo(() => {
-    return JSON.stringify(data.raw, null, 2);
-  }, [data.raw]);
-
   const tokenUsageRowsSorted = React.useMemo(() => {
     const rows = Array.isArray(data.tokenUsage?.rows) ? data.tokenUsage.rows : [];
     const sorted = rows.slice();
@@ -1377,19 +1372,6 @@ export default function App() {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
   }, [maybePlayDings, selectedSourceId, sourcesState]);
-
-  async function onCopyRawJson() {
-    setCopyState("idle");
-    try {
-      await navigator.clipboard.writeText(rawJsonText);
-      setCopyState("ok");
-      window.setTimeout(() => setCopyState("idle"), 1200);
-    } catch {
-      window.prompt("Copy raw JSON:", rawJsonText);
-      setCopyState("ok");
-      window.setTimeout(() => setCopyState("idle"), 1200);
-    }
-  }
 
   const liveLabel = connected ? "Live" : "Disconnected";
   const liveTone = connected ? "teal" : "sand";
@@ -1594,9 +1576,6 @@ export default function App() {
               aria-label="Play ding sound"
             >
               Ding
-            </button>
-            <button className="button" type="button" onClick={onCopyRawJson}>
-              {copyState === "ok" ? "Copied" : copyState === "err" ? "Copy failed" : "Copy raw JSON"}
             </button>
           </div>
         </header>
@@ -2077,18 +2056,7 @@ export default function App() {
             </div>
           </section>
 
-          <details className="details">
-            <summary className="detailsSummary">
-              <span className="detailsTitle">Raw JSON</span>
-              <span className="chev" aria-hidden="true" />
-            </summary>
-            <div className="detailsBody">
-              <pre className="code">
-                <code>{rawJsonText}</code>
-              </pre>
-            </div>
-          </details>
-        </main>
+          </main>
 
         <footer className="footer">
           <div className="footerLeft">
