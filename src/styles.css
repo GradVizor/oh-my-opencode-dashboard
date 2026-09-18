@@ -252,6 +252,19 @@
     rgba(40, 44, 48, 0.64);
 }
 
+/* Background task ring cards */
+[data-theme="dark"] .bgTaskRingCard {
+  border: 1px solid rgba(232, 230, 227, 0.10);
+  background:
+    radial-gradient(120px 60px at 14% 12%, rgba(26, 181, 163, 0.08), transparent 70%),
+    rgba(40, 44, 48, 0.64);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .bgTaskRingTrack {
+  stroke: rgba(232, 230, 227, 0.10);
+}
+
 /* Details/collapsible */
 [data-theme="dark"] .details {
   border: 1px solid rgba(232, 230, 227, 0.12);
@@ -886,6 +899,143 @@ input.field {
   opacity: 0.78;
 }
 
+/* Background task progress rings */
+.bgTaskRingGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.bgTaskRingCard {
+  border-radius: 14px;
+  border: 1px solid rgba(31, 36, 38, 0.10);
+  background:
+    radial-gradient(120px 60px at 14% 12%, rgba(15, 90, 81, 0.06), transparent 70%),
+    rgba(255, 255, 255, 0.64);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bgTaskRingCardTop {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bgTaskRing {
+  flex: 0 0 auto;
+}
+
+.bgTaskRingTrack {
+  stroke: rgba(31, 36, 38, 0.10);
+}
+
+.bgTaskRingProgress {
+  transition: stroke-dashoffset 600ms ease-out;
+}
+
+.bgTaskRing[data-tone="teal"] .bgTaskRingProgress {
+  stroke: var(--teal);
+}
+
+.bgTaskRing[data-tone="red"] .bgTaskRingProgress {
+  stroke: var(--red);
+}
+
+.bgTaskRing[data-tone="green"] .bgTaskRingProgress {
+  stroke: var(--green);
+}
+
+.bgTaskRing--indeterminate {
+  animation: bgTaskRingSpin 1.6s linear infinite;
+}
+
+.bgTaskRing--indeterminate .bgTaskRingProgress {
+  stroke-dasharray: 8 12;
+  animation: bgTaskRingPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes bgTaskRingSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes bgTaskRingPulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.bgTaskRingCardMeta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bgTaskRingCardAgent {
+  font-size: 15px;
+  font-weight: 650;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bgTaskRingCardEta {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.bgTaskRingCardDesc {
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bgTaskRingCardModel {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bgTaskCompactList {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.bgTaskCompactRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid rgba(31, 36, 38, 0.07);
+}
+
+.bgTaskCompactTitle {
+  min-width: 0;
+}
+
 .details {
   border-radius: var(--radius);
   border: 1px solid rgba(31, 36, 38, 0.12);
@@ -1121,6 +1271,10 @@ input.field {
     grid-template-columns: 1fr;
   }
 
+  .bgTaskRingGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   .timeSeriesAxisTop,
   .timeSeriesRow,
   .timeSeriesAxisBottom {
@@ -1194,6 +1348,10 @@ input.field {
   }
 
   .bgTaskToolCallsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .bgTaskRingGrid {
     grid-template-columns: 1fr;
   }
 }

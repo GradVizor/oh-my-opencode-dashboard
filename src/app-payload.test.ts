@@ -259,6 +259,8 @@ describe('toDashboardPayload', () => {
         toolCalls: 3,
         lastTool: "delegate_task",
         timeline: "2026-01-01T00:00:00Z: 2m",
+        startedAtMs: null,
+        expectedDurationMs: null,
       },
     ])
   })

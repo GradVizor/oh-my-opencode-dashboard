@@ -2,7 +2,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import * as fs from "node:fs"
 import { describe, expect, it, vi } from "vitest"
-import { deriveBackgroundTasks } from "./background-tasks"
+import { deriveBackgroundTasks, medianMs } from "./background-tasks"
 import { getStorageRoots } from "./session"
 
 function mkStorageRoot(): string {
@@ -1622,5 +1622,28 @@ describe("deriveBackgroundTasks", () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]?.id).toBe("call_1")
     expect(rows[0]?.sessionId).toBe("ses_child")
+  })
+})
+
+describe("medianMs", () => {
+  it("returns null for an empty array", () => {
+    expect(medianMs([])).toBeNull()
+  })
+
+  it("returns the true middle of an unsorted odd-length array", () => {
+    expect(medianMs([300, 100, 200])).toBe(200)
+    expect(medianMs([7])).toBe(7)
+  })
+
+  it("returns the rounded mean of the two middle values for even-length arrays", () => {
+    expect(medianMs([10000, 20000])).toBe(15000)
+    expect(medianMs([1, 4])).toBe(3)
+    expect(medianMs([1, 2])).toBe(2)
+  })
+
+  it("does not mutate its input array", () => {
+    const input = [300, 100, 200]
+    medianMs(input)
+    expect(input).toEqual([300, 100, 200])
   })
 })
