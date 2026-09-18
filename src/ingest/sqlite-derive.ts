@@ -1,4 +1,4 @@
-import type { BackgroundTaskRow } from "./background-tasks"
+import { medianMs, type BackgroundTaskRow } from "./background-tasks"
 import { pickLatestModelString } from "./model"
 import type { MainSessionView, SessionMetadata, StoredMessageMeta, StoredToolPart } from "./session"
 import {
@@ -498,6 +498,16 @@ export function deriveBackgroundTasksSqlite(opts: {
 
   const rows: BackgroundTaskRow[] = []
   const seenSessionIds = new Set<string>()
+
+  const completedDurationsByAgent = new Map<string, number[]>()
+  const allCompletedDurations: number[] = []
+  const recordCompletedDuration = (agent: string, duration: number): void => {
+    const list = completedDurationsByAgent.get(agent)
+    if (list) list.push(duration)
+    else completedDurationsByAgent.set(agent, [duration])
+    allCompletedDurations.push(duration)
+  }
+
   const ordered = [...main.value.metas].sort((a, b) => (b.time?.created ?? 0) - (a.time?.created ?? 0))
   for (const meta of ordered) {
     const messageCreatedAt = meta.time?.created ?? null
@@ -593,6 +603,10 @@ export function deriveBackgroundTasksSqlite(opts: {
 
       const timelineEndMs = status === "completed" ? (stats.value.lastUpdateAt ?? nowMs) : nowMs
 
+      if (status === "completed") {
+        recordCompletedDuration(agent, timelineEndMs - startedAt)
+      }
+
       if (backgroundSessionId) seenSessionIds.add(backgroundSessionId)
 
       rows.push({
@@ -605,6 +619,8 @@ export function deriveBackgroundTasksSqlite(opts: {
         lastModel,
         timeline: status === "unknown" ? "" : formatTimeline(startedAt, timelineEndMs),
         sessionId: backgroundSessionId,
+        startedAtMs: startedAt,
+        expectedDurationMs: null,
       })
     }
 
@@ -649,6 +665,9 @@ export function deriveBackgroundTasksSqlite(opts: {
       clampString(background.value.metas[0]?.agent, AGENT_MAX) ??
       "unknown"
     )
+    if (status === "completed" && typeof startAt === "number") {
+      recordCompletedDuration(agent, timelineEndMs - startAt)
+    }
 
     seenSessionIds.add(child.id)
     rows.push({
@@ -661,7 +680,14 @@ export function deriveBackgroundTasksSqlite(opts: {
       lastModel: background.value.metas.length > 0 ? pickLatestModelString(background.value.metas) : null,
       timeline: status === "unknown" ? "" : formatTimeline(startAt, timelineEndMs),
       sessionId: child.id,
+      startedAtMs: startAt,
+      expectedDurationMs: null,
     })
+  }
+
+  const globalMedian = medianMs(allCompletedDurations)
+  for (const row of rows) {
+    row.expectedDurationMs = medianMs(completedDurationsByAgent.get(row.agent) ?? []) ?? globalMedian
   }
 
   return { ok: true, value: rows }

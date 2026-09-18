@@ -16,6 +16,8 @@ export type BackgroundTaskRow = {
   lastModel: string | null
   timeline: string
   sessionId: string | null
+  startedAtMs: number | null
+  expectedDurationMs: number | null
 }
 
 type BackgroundSessionStats = {
@@ -341,6 +343,14 @@ function formatTimeline(startAt: number | null, endAtMs: number): string {
   return `${start}: ${elapsed}`
 }
 
+export function medianMs(values: number[]): number | null {
+  if (values.length === 0) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  if (sorted.length % 2 === 1) return sorted[mid]
+  return Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+}
+
 const TASK_TOOL_NAMES = new Set(["delegate_task", "task", "call_omo_agent", "background_task"])
 
 function isTaskTool(toolName: string): boolean {
@@ -408,6 +418,17 @@ export function deriveBackgroundTasks(opts: {
 
   const rows: BackgroundTaskRow[] = []
   const seenSessionIds = new Set<string>()
+
+  // Collect completed-task durations (completion - start, same timing data as `timeline`)
+  // so expectedDurationMs can be derived as the per-agent median over the whole sweep.
+  const completedDurationsByAgent = new Map<string, number[]>()
+  const allCompletedDurations: number[] = []
+  const recordCompletedDuration = (agent: string, duration: number): void => {
+    const list = completedDurationsByAgent.get(agent)
+    if (list) list.push(duration)
+    else completedDurationsByAgent.set(agent, [duration])
+    allCompletedDurations.push(duration)
+  }
 
   // Iterate newest-first to cap list and keep latest tasks.
   const ordered = [...metas].sort((a, b) => (b.time?.created ?? 0) - (a.time?.created ?? 0))
@@ -518,6 +539,10 @@ export function deriveBackgroundTasks(opts: {
 
       const timelineEndMs = status === "completed" ? (stats.lastUpdateAt ?? nowMs) : nowMs
 
+      if (status === "completed") {
+        recordCompletedDuration(agent, timelineEndMs - startedAt)
+      }
+
       if (backgroundSessionId) seenSessionIds.add(backgroundSessionId)
 
       rows.push({
@@ -530,6 +555,8 @@ export function deriveBackgroundTasks(opts: {
         lastModel,
         timeline: status === "unknown" ? "" : formatTimeline(startedAt, timelineEndMs),
         sessionId: backgroundSessionId,
+        startedAtMs: startedAt,
+        expectedDurationMs: null,
       })
     }
 
@@ -570,6 +597,9 @@ export function deriveBackgroundTasks(opts: {
       clampString(readBackgroundMetas(child.id)[0]?.agent, AGENT_MAX) ??
       "unknown"
     )
+    if (status === "completed" && typeof startAt === "number") {
+      recordCompletedDuration(agent, timelineEndMs - startAt)
+    }
 
     seenSessionIds.add(child.id)
     rows.push({
@@ -582,7 +612,14 @@ export function deriveBackgroundTasks(opts: {
       lastModel: readBackgroundModel(child.id),
       timeline: status === "unknown" ? "" : formatTimeline(startAt, timelineEndMs),
       sessionId: child.id,
+      startedAtMs: startAt,
+      expectedDurationMs: null,
     })
+  }
+
+  const globalMedian = medianMs(allCompletedDurations)
+  for (const row of rows) {
+    row.expectedDurationMs = medianMs(completedDurationsByAgent.get(row.agent) ?? []) ?? globalMedian
   }
 
   return rows

@@ -21,6 +21,8 @@ type BackgroundTask = {
   toolCalls: number;
   lastTool: string;
   timeline: string;
+  startedAtMs?: number | null;
+  expectedDurationMs?: number | null;
 };
 
 type ToolCallSummary = {
@@ -481,6 +483,8 @@ const FALLBACK_DATA: DashboardPayload = {
       toolCalls: 3,
       lastTool: "grep",
       timeline: "2026-01-01T00:00:00Z: 2m",
+      startedAtMs: null,
+      expectedDurationMs: null,
     },
   ],
   mainSessionTasks: [],
@@ -570,6 +574,12 @@ function toNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (typeof value !== "number") return null;
+  if (!Number.isFinite(value)) return null;
+  return value;
 }
 
 export function buildDashboardUrl(sourceId: string | null): string {
@@ -782,6 +792,163 @@ export function toggleIdInSet(id: string, currentSet: Set<string>): Set<string> 
   return next;
 }
 
+const BG_TASK_RING_RADIUS = 18;
+const BG_TASK_RING_CIRCUMFERENCE = 2 * Math.PI * BG_TASK_RING_RADIUS;
+
+export function computeTaskRing(
+  startedAtMs: number | null,
+  expectedDurationMs: number | null,
+  nowMs: number
+): { progress: number | null; etaMs: number | null; cadence: "countdown" | "indeterminate" } {
+  const started = typeof startedAtMs === "number" && Number.isFinite(startedAtMs) ? startedAtMs : null;
+  const expected =
+    typeof expectedDurationMs === "number" && Number.isFinite(expectedDurationMs) && expectedDurationMs > 0
+      ? expectedDurationMs
+      : null;
+
+  if (started === null || expected === null) {
+    return { progress: null, etaMs: null, cadence: "indeterminate" };
+  }
+
+  const elapsed = Math.max(0, nowMs - started);
+  const progress = Math.min(1, elapsed / expected);
+  const etaMs = Math.max(0, expected - elapsed);
+  return { progress, etaMs, cadence: "countdown" };
+}
+
+export function formatTaskEta(etaMs: number | null): string | null {
+  if (etaMs === null) return "estimating…";
+  if (etaMs <= 0) return "finishing…";
+
+  const seconds = Math.max(1, Math.round(etaMs / 1000));
+  if (seconds < 60) return `~${seconds}s left`;
+
+  const minutes = seconds / 60;
+  if (minutes < 60) return `~${formatTaskEtaUnit(minutes)}m left`;
+
+  const hours = minutes / 60;
+  return `~${formatTaskEtaUnit(hours)}h left`;
+}
+
+function formatTaskEtaUnit(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function isRunningTask(status: string): boolean {
+  return String(status ?? "").toLowerCase().trim() === "running";
+}
+
+function agentRingTone(agent: string): "teal" | "red" | "green" {
+  const a = String(agent ?? "").toLowerCase().trim();
+  if (a.includes("prometheus")) return "red";
+  if (a.includes("atlas")) return "green";
+  return "teal";
+}
+
+function capitalizeAgentName(agent: string): string {
+  const a = String(agent ?? "unknown").trim();
+  if (!a) return "Unknown";
+  return a.charAt(0).toUpperCase() + a.slice(1);
+}
+
+function BackgroundTaskRing(props: { progress: number | null; tone: "teal" | "red" | "green" }) {
+  const { progress, tone } = props;
+  const indeterminate = progress === null;
+  const clamped = indeterminate ? 0 : Math.min(1, Math.max(0, progress));
+  const dashOffset = BG_TASK_RING_CIRCUMFERENCE * (1 - clamped);
+
+  return (
+    <svg
+      className={`bgTaskRing${indeterminate ? " bgTaskRing--indeterminate" : ""}`}
+      data-tone={tone}
+      viewBox="0 0 44 44"
+      width="44"
+      height="44"
+      role="img"
+      aria-label={indeterminate ? "Estimating progress" : "Progress"}
+    >
+      <circle className="bgTaskRingTrack" cx="22" cy="22" r={BG_TASK_RING_RADIUS} fill="none" strokeWidth="4" />
+      <circle
+        className="bgTaskRingProgress"
+        cx="22"
+        cy="22"
+        r={BG_TASK_RING_RADIUS}
+        fill="none"
+        strokeWidth="4"
+        strokeLinecap="round"
+        strokeDasharray={BG_TASK_RING_CIRCUMFERENCE}
+        strokeDashoffset={dashOffset}
+        transform="rotate(-90 22 22)"
+      />
+    </svg>
+  );
+}
+
+export function BackgroundTasksSection(props: { tasks: BackgroundTask[] }) {
+  const tasks = Array.isArray(props.tasks) ? props.tasks : [];
+  const nowMs = Date.now();
+  const running = tasks.filter((t) => isRunningTask(t.status));
+  const nonRunning = tasks.filter((t) => !isRunningTask(t.status));
+
+  return (
+    <section className="card">
+      <div className="cardHeader">
+        <h2>Background tasks</h2>
+        <span className="badge">{running.length}</span>
+      </div>
+
+      {tasks.length === 0 ? (
+        <div className="muted" style={{ padding: 16 }}>
+          No background tasks detected yet. When you run background agents, they will appear here.
+        </div>
+      ) : (
+        <>
+          {running.length > 0 ? (
+            <div className="bgTaskRingGrid">
+              {running.map((t) => {
+                const ring = computeTaskRing(t.startedAtMs ?? null, t.expectedDurationMs ?? null, nowMs);
+                const tone = agentRingTone(t.agent);
+                return (
+                  <article key={t.id} className="bgTaskRingCard" data-tone={tone}>
+                    <div className="bgTaskRingCardTop">
+                      <BackgroundTaskRing progress={ring.progress} tone={tone} />
+                      <div className="bgTaskRingCardMeta">
+                        <div className="bgTaskRingCardAgent">{capitalizeAgentName(t.agent)}</div>
+                        <div className="bgTaskRingCardEta mono">{formatTaskEta(ring.etaMs)}</div>
+                      </div>
+                    </div>
+                    <div className="bgTaskRingCardDesc" title={t.description}>
+                      {t.description}
+                    </div>
+                    <div className="bgTaskRingCardModel mono" title={t.lastModel}>
+                      {t.lastModel}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {nonRunning.length > 0 ? (
+            <div className="bgTaskCompactList">
+              {nonRunning.map((t) => (
+                <div key={t.id} className="bgTaskCompactRow">
+                  <div className="bgTaskCompactTitle">
+                    <div className="taskTitle">{t.description}</div>
+                    {t.subline ? <div className="taskSub mono">{t.subline}</div> : null}
+                  </div>
+                  <span className={`pill pill-${statusTone(t.status)}`}>{t.status}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </>
+      )}
+    </section>
+  );
+}
+
 function toDashboardPayload(json: unknown): DashboardPayload {
   if (!json || typeof json !== "object") {
     return { ...FALLBACK_DATA, raw: json };
@@ -890,6 +1057,8 @@ function toDashboardPayload(json: unknown): DashboardPayload {
           toolCalls: Number(rec.toolCalls ?? rec.tool_calls ?? 0) || 0,
           lastTool: String(rec.lastTool ?? rec.last_tool ?? "-") || "-",
           timeline: String(rec.timeline ?? "") || "",
+          startedAtMs: toNullableNumber(rec.startedAtMs ?? rec.started_at_ms),
+          expectedDurationMs: toNullableNumber(rec.expectedDurationMs ?? rec.expected_duration_ms),
         };
       })
     : FALLBACK_DATA.backgroundTasks;
@@ -913,6 +1082,8 @@ function toDashboardPayload(json: unknown): DashboardPayload {
           toolCalls: Number(rec.toolCalls ?? rec.tool_calls ?? 0) || 0,
           lastTool: String(rec.lastTool ?? rec.last_tool ?? "-") || "-",
           timeline: String(rec.timeline ?? "") || "",
+          startedAtMs: toNullableNumber(rec.startedAtMs ?? rec.started_at_ms),
+          expectedDurationMs: toNullableNumber(rec.expectedDurationMs ?? rec.expected_duration_ms),
         };
       })
     : [];
@@ -1022,7 +1193,6 @@ export default function App() {
   const [defaultSourceId, setDefaultSourceId] = React.useState<string | null>(null);
   const [selectedSourceId, setSelectedSourceId] = React.useState<string | null>(null);
 
-  const [expandedBgTaskIds, setExpandedBgTaskIds] = React.useState<Set<string>>(() => new Set());
   const [expandedMainTaskIds, setExpandedMainTaskIds] = React.useState<Set<string>>(() => new Set());
   const [toolCallsBySession, setToolCallsBySession] = React.useState<
     Map<string, { state: "idle" | "loading" | "ok" | "error"; data: ToolCallsResponse | null; lastFetchedAtMs: number | null }>
@@ -1367,32 +1537,6 @@ export default function App() {
     }
   }, []);
 
-  function toggleBackgroundTaskExpanded(t: BackgroundTask) {
-    const nextExpanded = !expandedBgTaskIds.has(t.id);
-    setExpandedBgTaskIds((prev) => {
-      const next = new Set(prev);
-      if (nextExpanded) next.add(t.id);
-      else next.delete(t.id);
-      return next;
-    });
-
-    if (!nextExpanded) return;
-
-    const sessionId = toNonEmptyString(t.sessionId);
-    if (!sessionId) return;
-
-    const isRunning = String(t.status ?? "").toLowerCase().trim() === "running";
-    const cached = toolCallsBySessionRef.current.get(sessionId);
-    if (isRunning) {
-      void fetchToolCalls(sessionId, { force: true });
-      return;
-    }
-
-    if (cached?.data?.ok) return;
-    if (cached?.state === "loading") return;
-    void fetchToolCalls(sessionId, { force: false });
-  }
-
   function toggleMainTaskExpanded(t: BackgroundTask) {
     const nextExpanded = !expandedMainTaskIds.has(t.id);
     setExpandedMainTaskIds((prev) => {
@@ -1422,21 +1566,6 @@ export default function App() {
   React.useEffect(() => {
     if (!connected) return;
 
-    for (const t of data.backgroundTasks) {
-      const sessionId = toNonEmptyString(t.sessionId);
-      const cached = sessionId ? toolCallsBySessionRef.current.get(sessionId) : null;
-      const plan = computeToolCallsFetchPlan({
-        sessionId,
-        status: t.status,
-        cachedState: cached?.state ?? null,
-        cachedDataOk: Boolean(cached?.data?.ok),
-        isExpanded: expandedBgTaskIds.has(t.id),
-      });
-      if (plan.shouldFetch && sessionId) {
-        void fetchToolCalls(sessionId, { force: plan.force });
-      }
-    }
-
     for (const t of data.mainSessionTasks) {
       const sessionId = toNonEmptyString(t.sessionId);
       const cached = sessionId ? toolCallsBySessionRef.current.get(sessionId) : null;
@@ -1451,7 +1580,7 @@ export default function App() {
         void fetchToolCalls(sessionId, { force: plan.force });
       }
     }
-  }, [connected, data.backgroundTasks, data.mainSessionTasks, expandedBgTaskIds, expandedMainTaskIds, fetchToolCalls]);
+  }, [connected, data.mainSessionTasks, expandedMainTaskIds, fetchToolCalls]);
 
   return (
     <div className="page">
@@ -1874,134 +2003,7 @@ export default function App() {
             </div>
           </section>
 
-          <section className="card">
-            <div className="cardHeader">
-              <h2>Background tasks</h2>
-              <span className="badge">
-                {data.backgroundTasks.length}
-              </span>
-            </div>
-            <div className="tableWrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>DESCRIPTION</th>
-                    <th>AGENT</th>
-                    <th>LAST MODEL</th>
-                    <th>STATUS</th>
-                    <th>TOOL CALLS</th>
-                    <th>LAST TOOL</th>
-                    <th>TIMELINE</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.backgroundTasks.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="muted" style={{ padding: 16 }}>
-                        No background tasks detected yet. When you run background agents, they will appear here.
-                      </td>
-                    </tr>
-                  ) : null}
-                  {data.backgroundTasks.map((t) => {
-                    const expanded = expandedBgTaskIds.has(t.id);
-                    const sessionId = toNonEmptyString(t.sessionId);
-                    const detailId = `bg-toolcalls-${t.id}`;
-                    const entry = sessionId ? toolCallsBySession.get(sessionId) : null;
-                    const toolCalls = entry?.data?.ok ? entry.data.toolCalls : [];
-                    const showCapped = Boolean(entry?.data?.truncated);
-                    const caps = entry?.data?.caps;
-                    const showLoading = entry?.state === "loading";
-                    const showError = entry?.state === "error" && !entry?.data?.ok;
-                    const empty = sessionId ? toolCalls.length === 0 && !showLoading && !showError : true;
-
-                    return (
-                      <React.Fragment key={t.id}>
-                        <tr>
-                          <td>
-                            <div className="bgTaskRowTitleWrap">
-                              <button
-                                type="button"
-                                className="bgTaskToggle"
-                                onClick={() => toggleBackgroundTaskExpanded(t)}
-                                aria-expanded={expanded}
-                                aria-controls={detailId}
-                                title={expanded ? "Collapse" : "Expand"}
-                                aria-label={expanded ? "Collapse tool calls" : "Expand tool calls"}
-                              />
-                              <div className="bgTaskRowTitleText">
-                                <div className="taskTitle">{t.description}</div>
-                                {t.subline ? <div className="taskSub mono">{t.subline}</div> : null}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="mono">{t.agent}</td>
-                          <td className="mono">{t.lastModel}</td>
-                          <td>
-                            <span className={`pill pill-${statusTone(t.status)}`}>{t.status}</span>
-                          </td>
-                          <td className="mono">{t.toolCalls}</td>
-                          <td className="mono">{t.lastTool}</td>
-                          <td className="mono muted">{formatBackgroundTaskTimelineCell(t.status, t.timeline)}</td>
-                        </tr>
-
-                        {expanded ? (
-                          <tr>
-                            <td colSpan={7} className="bgTaskDetailCell">
-                              <section id={detailId} aria-label="Tool calls" className="bgTaskDetail">
-                                <div className="mono muted bgTaskDetailHeader">
-                                  Tool calls (metadata only){showLoading && toolCalls.length > 0 ? " - refreshing" : ""}
-                                  {showCapped
-                                    ? ` - capped${caps ? ` (max ${caps.maxMessages} messages / ${caps.maxToolCalls} tool calls)` : ""}`
-                                    : ""}
-                                </div>
-
-                                {!sessionId ? (
-                                  <div className="muted bgTaskDetailEmpty">
-                                    No session id available for this task.
-                                  </div>
-                                ) : showError ? (
-                                  <div className="muted bgTaskDetailEmpty">
-                                    Tool calls unavailable.
-                                  </div>
-                                ) : showLoading && toolCalls.length === 0 ? (
-                                  <div className="muted bgTaskDetailEmpty">
-                                    Loading tool calls...
-                                  </div>
-                                ) : empty ? (
-                                  <div className="muted bgTaskDetailEmpty">
-                                    No tool calls recorded.
-                                  </div>
-                                ) : (
-                                  <div className="bgTaskToolCallsGrid">
-                                    {toolCalls.map((c) => (
-                                      <div key={c.callId} className="bgTaskToolCall">
-                                        <div className="bgTaskToolCallRow">
-                                          <div className="mono bgTaskToolCallTool" title={c.tool}>
-                                            {c.tool}
-                                          </div>
-                                          <div className="mono muted bgTaskToolCallStatus" title={c.status}>
-                                            {c.status}
-                                          </div>
-                                        </div>
-                                        <div className="mono muted bgTaskToolCallTime">{formatTime(c.createdAtMs)}</div>
-                                        <div className="mono muted bgTaskToolCallId" title={c.callId}>
-                                          {c.callId}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </section>
-                            </td>
-                          </tr>
-                        ) : null}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <BackgroundTasksSection tasks={data.backgroundTasks} />
 
           </main>
 

@@ -46,6 +46,8 @@ export type DashboardPayload = {
     lastTool: string
     timeline: string
     sessionId: string | null
+    startedAtMs: number | null
+    expectedDurationMs: number | null
   }>
   mainSessionTasks: Array<{
     id: string
@@ -265,6 +267,8 @@ function buildDashboardPayloadFiles(opts: {
       lastTool: t.lastTool ?? "-",
       timeline: typeof t.timeline === "string" ? t.timeline : "",
       sessionId: t.sessionId ?? null,
+      startedAtMs: t.startedAtMs ?? null,
+      expectedDurationMs: t.expectedDurationMs ?? null,
     })),
     mainSessionTasks,
     timeSeries,
@@ -463,6 +467,8 @@ export function buildDashboardPayload(opts: {
       lastTool: t.lastTool ?? "-",
       timeline: typeof t.timeline === "string" ? t.timeline : "",
       sessionId: t.sessionId ?? null,
+      startedAtMs: t.startedAtMs ?? null,
+      expectedDurationMs: t.expectedDurationMs ?? null,
     })),
     mainSessionTasks,
     timeSeries: timeSeriesResult.value,
