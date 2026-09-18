@@ -7,8 +7,6 @@ import {
   SourceSelect,
   buildDashboardUrl,
   resolveSelectedSourceId,
-  computeMainAgentsScaleMax,
-  computeOtherMainAgentsCount,
 } from "./App";
 
 type TimeSeriesProps = React.ComponentProps<typeof TimeSeriesActivitySection>;
@@ -52,14 +50,14 @@ describe("TimeSeriesActivitySection (SSR)", () => {
     expect(html).toContain("timeSeriesAxisBottom");
   });
 
-  it("should render sand bars for other main agents when derived otherMain is non-zero", () => {
+  it("should render the three agent rows with their tones and labels", () => {
     // #given
     const timeSeries = mkTimeSeries({
       series: [
-        { id: "overall-main", label: "Overall", tone: "muted", values: [10, 0, 0] },
-        { id: "agent:sisyphus", label: "Sisyphus", tone: "teal", values: [0, 0, 0] },
-        { id: "agent:prometheus", label: "Prometheus", tone: "red", values: [0, 0, 0] },
-        { id: "agent:atlas", label: "Atlas", tone: "green", values: [0, 0, 0] },
+        { id: "overall-main", label: "Overall", tone: "muted", values: [3, 3, 0] },
+        { id: "agent:sisyphus", label: "Sisyphus", tone: "teal", values: [2, 0, 0] },
+        { id: "agent:prometheus", label: "Prometheus", tone: "red", values: [1, 0, 0] },
+        { id: "agent:atlas", label: "Atlas", tone: "green", values: [0, 3, 0] },
         { id: "background-total", label: "Background", tone: "muted", values: [0, 0, 0] },
       ],
     });
@@ -68,48 +66,24 @@ describe("TimeSeriesActivitySection (SSR)", () => {
     const html = renderToStaticMarkup(<TimeSeriesActivitySection timeSeries={timeSeries} />);
 
     // #then
-    expect(html).toContain("timeSeriesBar--sand");
-  });
-});
-
-describe("time-series helpers", () => {
-  it("computeOtherMainAgentsCount should clamp to >= 0 and ignore invalid numbers", () => {
-    // #given
-    const value = computeOtherMainAgentsCount({
-      overall: 10,
-      background: 3,
-      sisyphus: 2,
-      prometheus: 1,
-      atlas: 0,
-    });
-
-    // #then
-    expect(value).toBe(4);
-
-    expect(
-      computeOtherMainAgentsCount({
-        overall: NaN,
-        background: Infinity,
-        sisyphus: -1,
-        prometheus: 0,
-        atlas: 0,
-      })
-    ).toBe(0);
+    expect(html).toContain('data-tone="teal"');
+    expect(html).toContain('data-tone="red"');
+    expect(html).toContain('data-tone="green"');
+    expect(html).toContain("Sisyphus");
+    expect(html).toContain("Prometheus");
+    expect(html).toContain("Atlas");
+    expect(html).not.toContain("timeSeriesBar--sand");
   });
 
-  it("computeMainAgentsScaleMax should include otherMain in the max", () => {
+  it("should render no bars when all agent series are zero", () => {
     // #given
-    const scaleMax = computeMainAgentsScaleMax({
-      buckets: 1,
-      overallValues: [10],
-      backgroundValues: [0],
-      sisyphusValues: [0],
-      prometheusValues: [0],
-      atlasValues: [0],
-    });
+    const timeSeries = mkTimeSeries();
+
+    // #when
+    const html = renderToStaticMarkup(<TimeSeriesActivitySection timeSeries={timeSeries} />);
 
     // #then
-    expect(scaleMax).toBe(10);
+    expect(html).not.toContain("<rect");
   });
 });
 

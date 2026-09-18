@@ -1,7 +1,6 @@
 import * as React from "react";
 import { computeWaitingDing } from "./ding-policy";
 import { playDing, unlockAudio } from "./sound";
-import { computeStackedSegments } from "./timeseries-stacked";
 import { formatTokenCount } from "./format-token-count";
 
 const APP_VERSION =
@@ -108,52 +107,6 @@ function toNonNegativeFinite(value: unknown): number {
   return Math.max(0, value);
 }
 
-export function computeOtherMainAgentsCount(params: {
-  overall: unknown;
-  background: unknown;
-  sisyphus: unknown;
-  prometheus: unknown;
-  atlas: unknown;
-}): number {
-  const overall = toNonNegativeFinite(params.overall);
-  const background = toNonNegativeFinite(params.background);
-  const sisyphus = toNonNegativeFinite(params.sisyphus);
-  const prometheus = toNonNegativeFinite(params.prometheus);
-  const atlas = toNonNegativeFinite(params.atlas);
-
-  const mainTotal = Math.max(0, overall - background);
-  return Math.max(0, mainTotal - sisyphus - prometheus - atlas);
-}
-
-export function computeMainAgentsScaleMax(params: {
-  buckets: number;
-  overallValues: unknown[];
-  backgroundValues: unknown[];
-  sisyphusValues: unknown[];
-  prometheusValues: unknown[];
-  atlasValues: unknown[];
-}): number {
-  const buckets = Math.max(0, Math.floor(params.buckets));
-  let sumMax = 0;
-
-  for (let i = 0; i < buckets; i++) {
-    const sis = toNonNegativeFinite(params.sisyphusValues[i]);
-    const pro = toNonNegativeFinite(params.prometheusValues[i]);
-    const atl = toNonNegativeFinite(params.atlasValues[i]);
-    const other = computeOtherMainAgentsCount({
-      overall: params.overallValues[i],
-      background: params.backgroundValues[i],
-      sisyphus: sis,
-      prometheus: pro,
-      atlas: atl,
-    });
-    const s = sis + pro + atl + other;
-    if (s > sumMax) sumMax = s;
-  }
-
-  return Math.max(1, sumMax || 1);
-}
-
 export function TimeSeriesActivitySection(props: { timeSeries: TimeSeries }) {
   const timeSeriesById = new Map<TimeSeriesSeriesId, TimeSeriesSeries>();
   for (const s of props.timeSeries.series) {
@@ -170,6 +123,20 @@ export function TimeSeriesActivitySection(props: { timeSeries: TimeSeries }) {
 
   const overallValues = timeSeriesById.get("overall-main")?.values ?? [];
 
+  const sisyphusValues = timeSeriesById.get("agent:sisyphus")?.values ?? [];
+  const prometheusValues = timeSeriesById.get("agent:prometheus")?.values ?? [];
+  const atlasValues = timeSeriesById.get("agent:atlas")?.values ?? [];
+
+  let agentSumMax = 0;
+  for (let i = 0; i < buckets; i++) {
+    const sum =
+      toNonNegativeFinite(sisyphusValues[i]) +
+      toNonNegativeFinite(prometheusValues[i]) +
+      toNonNegativeFinite(atlasValues[i]);
+    if (sum > agentSumMax) agentSumMax = sum;
+  }
+  const agentScaleMax = Math.max(1, agentSumMax || 1);
+
   return (
     <section className="timeSeries">
       <div className="timeSeriesHeader">
@@ -181,8 +148,22 @@ export function TimeSeriesActivitySection(props: { timeSeries: TimeSeries }) {
         {(
           [
             {
-              kind: "main-agents" as const,
-              label: "Main agents" as const,
+              kind: "agent" as const,
+              seriesId: "agent:sisyphus" as const,
+              label: "Sisyphus" as const,
+              tone: "teal" as const,
+            },
+            {
+              kind: "agent" as const,
+              seriesId: "agent:prometheus" as const,
+              label: "Prometheus" as const,
+              tone: "red" as const,
+            },
+            {
+              kind: "agent" as const,
+              seriesId: "agent:atlas" as const,
+              label: "Atlas" as const,
+              tone: "green" as const,
             },
             {
               kind: "single" as const,
@@ -201,23 +182,11 @@ export function TimeSeriesActivitySection(props: { timeSeries: TimeSeries }) {
           const barW = 0.85;
           const barInset = (1 - barW) / 2;
 
-          if (row.kind === "main-agents") {
-            const sisyphusValues = timeSeriesById.get("agent:sisyphus")?.values ?? [];
-            const prometheusValues = timeSeriesById.get("agent:prometheus")?.values ?? [];
-            const atlasValues = timeSeriesById.get("agent:atlas")?.values ?? [];
-            const backgroundValues = timeSeriesById.get("background-total")?.values ?? [];
-
-            const scaleMax = computeMainAgentsScaleMax({
-              buckets,
-              overallValues,
-              backgroundValues,
-              sisyphusValues,
-              prometheusValues,
-              atlasValues,
-            });
+          if (row.kind === "agent") {
+            const agentValues = timeSeriesById.get(row.seriesId)?.values ?? [];
 
             return (
-              <div key="main-agents" className="timeSeriesRow">
+              <div key={row.seriesId} className="timeSeriesRow" data-tone={row.tone}>
                 <div className="timeSeriesRowLabel">{row.label}</div>
                 <div className="timeSeriesSvgWrap">
                   <svg className="timeSeriesSvg" viewBox={viewBox} preserveAspectRatio="none" aria-hidden="true">
@@ -236,43 +205,21 @@ export function TimeSeriesActivitySection(props: { timeSeries: TimeSeries }) {
                       );
                     })}
 
-                    {Array.from({ length: buckets }, (_, i) => {
-                      const bucketMsAt = bucketStartMs + i * bucketMs;
+                    {agentValues.slice(0, buckets).map((v, i) => {
+                      const h = barHeight(v ?? 0, agentScaleMax, chartHeight);
+                      if (!h) return null;
                       const barX = i + barInset;
-
-                      const sis = toNonNegativeFinite(sisyphusValues[i]);
-                      const pro = toNonNegativeFinite(prometheusValues[i]);
-                      const atl = toNonNegativeFinite(atlasValues[i]);
-                      const other = computeOtherMainAgentsCount({
-                        overall: overallValues[i],
-                        background: backgroundValues[i],
-                        sisyphus: sis,
-                        prometheus: pro,
-                        atlas: atl,
-                      });
-
-                      const segments = computeStackedSegments(
-                        {
-                          sisyphus: sis,
-                          prometheus: pro,
-                          atlas: atl,
-                          other,
-                        },
-                        scaleMax,
-                        chartHeight
-                      );
-
-                      if (segments.length === 0) return null;
-                      return segments.map((seg) => (
+                      const bucketMsAt = bucketStartMs + i * bucketMs;
+                      return (
                         <rect
-                          key={`main-agents-${bucketMsAt}-${seg.tone}`}
-                          className={`timeSeriesBar timeSeriesBar--${seg.tone}`}
+                          key={`${row.seriesId}-${bucketMsAt}`}
+                          className="timeSeriesBar"
                           x={barX}
-                          y={padTop + seg.y}
+                          y={baselineY - h}
                           width={barW}
-                          height={seg.height}
+                          height={h}
                         />
-                      ));
+                      );
                     })}
                   </svg>
                 </div>
